@@ -1,18 +1,20 @@
 package main
 
 import (
-  "fmt"
-  "log"
-  "io"
-  "os"
-  "time"
-  "strconv"
-  "strings"
+	"archive/zip"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
-  "errors"
-  "regexp"
+	"errors"
+	"regexp"
 
-  "github.com/PuerkitoBio/goquery"
+	"github.com/PuerkitoBio/goquery"
 )
 
 // TODOS:
@@ -24,56 +26,55 @@ import (
 //  [] - If we continue replacing the fractions we should ensure that the are spaces before them to avoid improper fractions being rendered as  11/2 rather than 1 1/2
 //  [] - Parse instructions to see if they have a trailing colon and make it a sub ingredient list
 
-
 type RecipeNode struct {
-  *goquery.Selection
+	*goquery.Selection
 }
 
 func (s RecipeNode) ItemProp(elemName string, propName string) *goquery.Selection {
- return s.Find(elemName + "[itemprop=\"" + propName + "\"]")
+	return s.Find(elemName + "[itemprop=\"" + propName + "\"]")
 }
 
 func (s RecipeNode) ItemPropAttrOr(elemName string, propName string, attr string, defaultValue string) string {
- return s.ItemProp(elemName, propName).AttrOr(attr, defaultValue) 
+	return s.ItemProp(elemName, propName).AttrOr(attr, defaultValue)
 }
 
 func (s RecipeNode) ItemPropElemText(propName string) string {
- return s.ItemProp("", propName).Text() 
+	return s.ItemProp("", propName).Text()
 }
 
 func (s RecipeNode) ItemPropContentOr(propName string, defaultValue string) string {
- return s.ItemPropAttrOr("meta", propName, "content", defaultValue)
+	return s.ItemPropAttrOr("meta", propName, "content", defaultValue)
 }
 
 func (s RecipeNode) ItemPropContentList(propName string) []string {
-  contents := make([]string, 0)
+	contents := make([]string, 0)
 
-  s.ItemProp("meta", propName).Each(func (i int, meta *goquery.Selection){
-    content := meta.AttrOr("content", "") 
-    if content != "" {
-      contents = append(contents, content)
-    }
-  })
+	s.ItemProp("meta", propName).Each(func(i int, meta *goquery.Selection) {
+		content := meta.AttrOr("content", "")
+		if content != "" {
+			contents = append(contents, content)
+		}
+	})
 
-  return contents
+	return contents
 }
 
 var fractions = map[rune]string{
-  '¼': "1/4",
-  '½': "1/2",
-  '¾': "3/4",
-  '⅓': "1/3",
-  '⅔': "2/3",
-  '⅕': "1/5",
-  '⅖': "2/5",
-  '⅗': "3/5",
-  '⅘': "4/5",
-  '⅙': "1/6",
-  '⅚': "5/6",
-  '⅛': "1/8",
-  '⅜': "3/8",
-  '⅝': "5/8",
-  '⅞': "7/8",
+	'¼': "1/4",
+	'½': "1/2",
+	'¾': "3/4",
+	'⅓': "1/3",
+	'⅔': "2/3",
+	'⅕': "1/5",
+	'⅖': "2/5",
+	'⅗': "3/5",
+	'⅘': "4/5",
+	'⅙': "1/6",
+	'⅚': "5/6",
+	'⅛': "1/8",
+	'⅜': "3/8",
+	'⅝': "5/8",
+	'⅞': "7/8",
 }
 
 func ConvertFractions(input string) string {
@@ -91,60 +92,62 @@ func ConvertFractions(input string) string {
 }
 
 func (s RecipeNode) ItemPropChildrenText(propName string) []string {
-  stringList := make([]string, 0)
+	stringList := make([]string, 0)
 
-  s.ItemProp("", propName).Children().Each(func (i int, par *goquery.Selection){
-    partext := ConvertFractions(strings.TrimSpace(par.Text()))
-    if partext != "" {
-      stringList = append(stringList, partext)
-    }
-  })
+	s.ItemProp("", propName).Children().Each(func(i int, par *goquery.Selection) {
+		partext := ConvertFractions(strings.TrimSpace(par.Text()))
+		if partext != "" {
+			stringList = append(stringList, partext)
+		}
+	})
 
-  return stringList
+	return stringList
 }
 
 func (s RecipeNode) ExtractRecipeCourses() []string {
-  courses := make([]string, 0)
+	courses := make([]string, 0)
 
-  s.ItemProp("", "recipeCourse").Each(func (i int, elem *goquery.Selection){
-    // Courses can be split between a text node *and* attribute for extra courses
-    if elem.Is("span") {
-      course := elem.Text() 
-      if course != "" {
-        courses = append(courses, course)
-      }
-    } else if elem.Is("meta") {
-      course := elem.AttrOr("content", "") 
-      if course != "" {
-        courses = append(courses, course)
-      }
-    }
-  })
+	s.ItemProp("", "recipeCourse").Each(func(i int, elem *goquery.Selection) {
+		// Courses can be split between a text node *and* attribute for extra courses
+		if elem.Is("span") {
+			course := elem.Text()
+			if course != "" {
+				courses = append(courses, course)
+			}
+		} else if elem.Is("meta") {
+			course := elem.AttrOr("content", "")
+			if course != "" {
+				courses = append(courses, course)
+			}
+		}
+	})
 
-  return courses
+	return courses
 }
 
 func (s RecipeNode) ExtractRecipePhotos() []string {
-  photos := make([]string, 0)
+	photos := make([]string, 0)
 
-  s.Find("img.recipe-photos").Each(func (i int, img *goquery.Selection){
-    img_src := img.AttrOr("src", "")
-    if img_src != "" {
-      photos = append(photos, img_src)
-    }
-  })
+	s.Find("img.recipe-photos").Each(func(i int, img *goquery.Selection) {
+		img_src := img.AttrOr("src", "")
+		if img_src != "" {
+			photos = append(photos, img_src)
+		}
+	})
 
-  return photos
+	return photos
 }
 
 func (s RecipeNode) ExtractRecipeMetadata() RecipeMetadata {
-  metadata := RecipeMetadata{}
+	metadata := RecipeMetadata{}
 
-  metadata.UUID = s.ItemPropContentOr("recipeId", "")
+	metadata.UUID = s.ItemPropContentOr("recipeId", "")
 	metadata.Favorited = s.ItemPropContentOr("recipeIsFavourite", "False") == "True"
 
-  rating, err := strconv.Atoi(s.ItemPropContentOr("recipeRating", "0"))
-  if err == nil { metadata.Rating = rating }
+	rating, err := strconv.Atoi(s.ItemPropContentOr("recipeRating", "0"))
+	if err == nil {
+		metadata.Rating = rating
+	}
 
 	metadata.Source = s.ItemPropElemText("recipeSource")
 
@@ -152,80 +155,84 @@ func (s RecipeNode) ExtractRecipeMetadata() RecipeMetadata {
 	metadata.CollectionList = s.ItemPropContentList("recipeCollection")
 	metadata.CourseList = s.ExtractRecipeCourses()
 
-	metadata.Yield = s.ItemPropElemText("recipeYield" )
+	metadata.Yield = s.ItemPropElemText("recipeYield")
 
 	prepDuration, err := ParseISODuration(strings.TrimSpace(s.ItemPropContentOr("prepTime", "PT50S")))
-	if err == nil { metadata.PrepTime = prepDuration }
+	if err == nil {
+		metadata.PrepTime = prepDuration
+	}
 
 	cookDuration, err := ParseISODuration(s.ItemPropContentOr("cookTime", "PT0S"))
-	if err == nil { metadata.CookTime = cookDuration }
+	if err == nil {
+		metadata.CookTime = cookDuration
+	}
 
-  return metadata
+	return metadata
 }
 
 func (s RecipeNode) ExtractRecipeNutrition() RecipeNutrition {
-  nutrition := RecipeNutrition{}
+	nutrition := RecipeNutrition{}
 
-  nutrition.Serving = s.ItemPropContentOr("recipeNutServingSize", "")
-  nutrition.Calories = s.ItemPropContentOr("recipeNutCalories", "") 
-  nutrition.TotalFat = s.ItemPropContentOr("recipeNutTotalFat", "")
-  nutrition.SaturatedFat = s.ItemPropContentOr("recipeNutSaturatedFat", "")
-  nutrition.Sodium = s.ItemPropContentOr("recipeNutSodium", "")
-  nutrition.TotalCarbohydrate = s.ItemPropContentOr("recipeNutTotalCarbohydrate", "")
-  nutrition.DietaryFiber = s.ItemPropContentOr("recipeNutDietaryFiber", "")
-  nutrition.Sugars = s.ItemPropContentOr("recipeNutSugars", "")
-  nutrition.Protein = s.ItemPropContentOr("recipeNutProtein", "")
+	nutrition.Serving = s.ItemPropContentOr("recipeNutServingSize", "")
+	nutrition.Calories = s.ItemPropContentOr("recipeNutCalories", "")
+	nutrition.TotalFat = s.ItemPropContentOr("recipeNutTotalFat", "")
+	nutrition.SaturatedFat = s.ItemPropContentOr("recipeNutSaturatedFat", "")
+	nutrition.Sodium = s.ItemPropContentOr("recipeNutSodium", "")
+	nutrition.TotalCarbohydrate = s.ItemPropContentOr("recipeNutTotalCarbohydrate", "")
+	nutrition.DietaryFiber = s.ItemPropContentOr("recipeNutDietaryFiber", "")
+	nutrition.Sugars = s.ItemPropContentOr("recipeNutSugars", "")
+	nutrition.Protein = s.ItemPropContentOr("recipeNutProtein", "")
 
-  return nutrition
+	return nutrition
 }
 
 func (s RecipeNode) ExtractRecipe() Recipe {
-  recipe := Recipe{}
+	recipe := Recipe{}
 
-  recipe.Title = s.ItemPropElemText("name")
-  recipe.Metadata = s.ExtractRecipeMetadata()
-  recipe.PhotoPaths = s.ExtractRecipePhotos()
+	recipe.Title = s.ItemPropElemText("name")
+	recipe.Metadata = s.ExtractRecipeMetadata()
+	recipe.PhotoPaths = s.ExtractRecipePhotos()
 
 	recipe.IngredientLines = s.ItemPropChildrenText("recipeIngredients")
 	recipe.InstructionLines = s.ItemPropChildrenText("recipeDirections")
 	recipe.NotesLines = s.ItemPropChildrenText("recipeNotes")
 
-  return recipe
+	return recipe
 }
 
 type RecipeNutrition struct {
-	Serving string
-	Calories string
-	TotalFat string
-	SaturatedFat string
-	Sodium string
+	Serving           string
+	Calories          string
+	TotalFat          string
+	SaturatedFat      string
+	Sodium            string
 	TotalCarbohydrate string
-	DietaryFiber string
-	Sugars string
-	Protein string
+	DietaryFiber      string
+	Sugars            string
+	Protein           string
 }
 
 type RecipeMetadata struct {
-  UUID string
-  Favorited bool
-  Rating int
-  Source string
-  CategoryList []string
-  CourseList []string
-  CollectionList []string
-  Yield string
-  CookTime time.Duration
-  PrepTime time.Duration
+	UUID           string
+	Favorited      bool
+	Rating         int
+	Source         string
+	CategoryList   []string
+	CourseList     []string
+	CollectionList []string
+	Yield          string
+	CookTime       time.Duration
+	PrepTime       time.Duration
 }
 
 type Recipe struct {
-  Title string
-  Nutrition RecipeNutrition
-  Metadata RecipeMetadata
-  PhotoPaths []string
-  IngredientLines []string
-  InstructionLines []string
-  NotesLines []string
+	Title            string
+	Nutrition        RecipeNutrition
+	Metadata         RecipeMetadata
+	PhotoPaths       []string
+	IngredientLines  []string
+	InstructionLines []string
+	NotesLines       []string
 }
 
 func (r Recipe) FormatAsRecipeMD() string {
@@ -234,42 +241,42 @@ func (r Recipe) FormatAsRecipeMD() string {
 
 	output.WriteString("\n")
 	if r.Metadata.Rating != 0 {
-	  output.WriteString(fmt.Sprintf("Rating: %d-star\n", r.Metadata.Rating))
+		output.WriteString(fmt.Sprintf("Rating: %d-star\n", r.Metadata.Rating))
 	}
 	if len(r.Metadata.CollectionList) > 0 {
-	  output.WriteString(fmt.Sprintf("Collections: %s\n", strings.Join(r.Metadata.CollectionList, ", ")))
+		output.WriteString(fmt.Sprintf("Collections: %s\n", strings.Join(r.Metadata.CollectionList, ", ")))
 	}
 	if len(r.Metadata.CourseList) > 0 {
-	  output.WriteString(fmt.Sprintf("Course: %s\n", strings.Join(r.Metadata.CourseList, ", ")))
+		output.WriteString(fmt.Sprintf("Course: %s\n", strings.Join(r.Metadata.CourseList, ", ")))
 	}
 
 	output.WriteString("\n")
 	if r.Metadata.Source != "" {
-	  output.WriteString(fmt.Sprintf("Source: %s\n", r.Metadata.Source))
+		output.WriteString(fmt.Sprintf("Source: %s\n", r.Metadata.Source))
 	}
 
 	output.WriteString("\n")
 	if r.Metadata.CookTime > time.Duration(0) {
-	  output.WriteString(fmt.Sprintf("Cook Time: %s\n", r.Metadata.CookTime))
+		output.WriteString(fmt.Sprintf("Cook Time: %s\n", r.Metadata.CookTime))
 	}
 	if r.Metadata.PrepTime > time.Duration(0) {
-	  output.WriteString(fmt.Sprintf("Prep Time: %s\n", r.Metadata.PrepTime))
+		output.WriteString(fmt.Sprintf("Prep Time: %s\n", r.Metadata.PrepTime))
 	}
 
 	output.WriteString("\n")
 	if len(r.Metadata.CategoryList) > 0 {
-	  output.WriteString(fmt.Sprintf("*%s*\n", strings.Join(r.Metadata.CategoryList, ", ")))
+		output.WriteString(fmt.Sprintf("*%s*\n", strings.Join(r.Metadata.CategoryList, ", ")))
 	}
 
 	output.WriteString("\n")
 	if r.Metadata.Yield != "" {
-	  output.WriteString(fmt.Sprintf("**%s**\n", r.Metadata.Yield))
+		output.WriteString(fmt.Sprintf("**%s**\n", r.Metadata.Yield))
 	}
 
 	output.WriteString("\n---\n\n")
 
 	for _, ingredient := range r.IngredientLines {
-	  output.WriteString(fmt.Sprintf("- %s\n", ingredient)) // TODO: parse so the ammount and unit go inside *
+		output.WriteString(fmt.Sprintf("- %s\n", ingredient)) // TODO: parse so the ammount and unit go inside *
 	}
 
 	output.WriteString("\n---\n\n")
@@ -277,10 +284,10 @@ func (r Recipe) FormatAsRecipeMD() string {
 	output.WriteString("### Instructions\n\n")
 	output.WriteString(strings.Join(r.InstructionLines, "\n"))
 
-  if len(r.NotesLines) > 0 {
-	  output.WriteString("\n\n### Notes\n\n")
-	  output.WriteString(strings.Join(r.NotesLines, "\n"))
-  }
+	if len(r.NotesLines) > 0 {
+		output.WriteString("\n\n### Notes\n\n")
+		output.WriteString(strings.Join(r.NotesLines, "\n"))
+	}
 
 	output.WriteString("\n")
 
@@ -289,41 +296,89 @@ func (r Recipe) FormatAsRecipeMD() string {
 
 func (r Recipe) WriteRecipeMD() error {
 	content := r.FormatAsRecipeMD()
-	return os.WriteFile("./recipes/" + r.Metadata.UUID + ".md", []byte(content), 0644)
+	return os.WriteFile("./recipes/"+r.Metadata.UUID+".md", []byte(content), 0644)
 }
 
-func ScrapeRecipeKeeperExportHtml(reader io.Reader) {
-  doc, err := goquery.NewDocumentFromReader(reader)
-  if err != nil {
-    log.Fatal(err)
-  }
+func ScrapeRecipeKeeperExportHtml(reader io.Reader) (int, error) {
+	doc, err := goquery.NewDocumentFromReader(reader)
+	if err != nil {
+		return 0, err
+	}
 
-  doc.Find("div.recipe-details").Each(func(i int, s *goquery.Selection) {
-
-		r := RecipeNode{ s }
+	count := 0
+	doc.Find("div.recipe-details").Each(func(i int, s *goquery.Selection) {
+		r := RecipeNode{s}
 		recipe := r.ExtractRecipe()
-		r.ExtractRecipe().WriteRecipeMD()
-
-    if strings.Contains(recipe.Title, "Saag") {
-    // if recipe.Metadata.Favorited {
-		  // fmt.Printf("%+v\n", recipe)
-		  // fmt.Print(r.ExtractRecipe().FormatAsRecipeMD())
-    }
+		err := recipe.WriteRecipeMD()
+		if err != nil {
+			log.Printf("Error writing recipe %s: %v\n", recipe.Title, err)
+		} else {
+			count++
+		}
 	})
+
+	return count, nil
+}
+
+func extractAndProcessZip(zipPath string) error {
+	// Open the zip file
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("failed to open zip file: %w", err)
+	}
+	defer reader.Close()
+
+	// Look for recipes.html in the zip
+	for _, file := range reader.File {
+		if filepath.Base(file.Name) == "recipes.html" {
+			fmt.Printf("Found recipes.html in zip: %s\n", file.Name)
+
+			// Open the file inside the zip
+			rc, err := file.Open()
+			if err != nil {
+				return fmt.Errorf("failed to open recipes.html in zip: %w", err)
+			}
+			defer rc.Close()
+
+			// Create recipes directory if it doesn't exist
+			if err := os.MkdirAll("./recipes", 0755); err != nil {
+				return fmt.Errorf("failed to create recipes directory: %w", err)
+			}
+
+			// Process the HTML
+			count, err := ScrapeRecipeKeeperExportHtml(rc)
+			if err != nil {
+				return fmt.Errorf("failed to process recipes: %w", err)
+			}
+
+			fmt.Printf("Successfully converted %d recipes\n", count)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("recipes.html not found in zip file")
 }
 
 func main() {
-  path := "/home/kalebo/Downloads/RecipeKeeper_20230630_093852/recipes.html"
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: %s <recipekeeper_export.zip>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nConverts RecipeKeeper HTML export to RecipeMD format\n")
+		fmt.Fprintf(os.Stderr, "The zip file should contain a recipes.html file from RecipeKeeper export\n")
+		os.Exit(1)
+	}
 
-  file, err := os.Open(path)
-  if err != nil {
-    log.Fatal(err)
-  }
+	zipPath := os.Args[1]
 
-  reader := io.Reader(file)
-  defer file.Close()
+	// Check if file exists
+	if _, err := os.Stat(zipPath); os.IsNotExist(err) {
+		log.Fatalf("File not found: %s\n", zipPath)
+	}
 
-  ScrapeRecipeKeeperExportHtml(reader)
+	fmt.Printf("Processing RecipeKeeper export: %s\n", zipPath)
+
+	if err := extractAndProcessZip(zipPath); err != nil {
+		log.Fatal(err)
+	}
 }
 
 // Dates are full of edge cases, and go has completely punted on ISO_8601 durations. :p
@@ -380,5 +435,3 @@ func ParseISODuration(isoDuration string) (time.Duration, error) {
 	return time.ParseDuration(goDuration)
 
 }
-
-
